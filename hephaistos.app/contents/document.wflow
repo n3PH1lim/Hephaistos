@@ -1,0 +1,410 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>AMApplicationBuild</key>
+	<string>409.2</string>
+	<key>AMApplicationVersion</key>
+	<string>2.5</string>
+	<key>AMDocumentVersion</key>
+	<string>2</string>
+	<key>actions</key>
+	<array>
+		<dict>
+			<key>action</key>
+			<dict>
+				<key>AMAccepts</key>
+				<dict>
+					<key>Container</key>
+					<string>List</string>
+					<key>Optional</key>
+					<true/>
+					<key>Types</key>
+					<array>
+						<string>com.apple.cocoa.string</string>
+					</array>
+				</dict>
+				<key>AMActionVersion</key>
+				<string>2.0.3</string>
+				<key>AMApplication</key>
+				<array>
+					<string>Automator</string>
+				</array>
+				<key>AMParameterProperties</key>
+				<dict>
+					<key>COMMAND_STRING</key>
+					<dict/>
+					<key>CheckedForUserDefaultShell</key>
+					<dict/>
+					<key>inputMethod</key>
+					<dict/>
+					<key>shell</key>
+					<dict/>
+					<key>source</key>
+					<dict/>
+				</dict>
+				<key>AMProvides</key>
+				<dict>
+					<key>Container</key>
+					<string>List</string>
+					<key>Types</key>
+					<array>
+						<string>com.apple.cocoa.string</string>
+					</array>
+				</dict>
+				<key>ActionBundlePath</key>
+				<string>/System/Library/Automator/Run Shell Script.action</string>
+				<key>ActionName</key>
+				<string>Shell-Skript ausführen</string>
+				<key>ActionParameters</key>
+				<dict>
+					<key>COMMAND_STRING</key>
+					<string>#!/bin/bash
+#***********************************************************
+#* (c)  Sebastian Hengel
+#***********************************************************
+#*
+#* Filename: hephaistos.sh
+#* Programtype: Shell-Script
+#* Function: renames jpeg and raw picture files
+#* E-Mail: sebastian.hengel@gmail.com
+#*
+#* created 2015.09.03 Sebastian Hengel
+#**********************************************************
+
+###########################################################
+### -- ENVIROMENT -- ###
+
+#*******************
+DEBUG=1 # Debug Mode 1(ON) 0(OFF)
+#*******************
+
+logfile=/tmp/hepahistos.log
+exec &gt; $logfile 2&gt;&amp;1
+
+# variables
+declare CURRENT_COUNTER
+declare BSORT=()
+
+TIME=$(date)
+WORKING_DIRECTORY=$(pwd)
+
+###########################################################
+### -- FUNCTIONS -- ###
+
+# function for debug printig
+# If variable DEBUG is set to 1 the string will be printed with timestamp
+function decho(){
+if [ $DEBUG -eq 1 ]
+then :
+  #set -x #can used for detailed debug output
+	echo -e "$(date '+%F %T'): $1"
+fi
+}
+
+#######################
+
+# prints status when script starts
+function start_processing(){
+	# clear screen
+	clear
+
+	decho " ------------"
+	decho "| Hephaistos |"
+	decho " ------------"
+
+	decho "############################################"
+	decho "# raw and jpeg file rename utility"
+	decho "# starting at ${TIME}"
+	decho "############################################"
+	decho ""
+
+  if [ $# -gt 0 ]
+  then :
+        return
+  else :
+      osascript -e 'tell app "System Events" to display dialog "Bitte Ordner mit Bildern auf App ziehen."' &gt;/dev/null
+      exit
+  fi
+}
+
+#######################
+
+# get user input for current CURRENT_COUNTER
+# only works on osx because of using apple script
+function get_counter(){
+CURRENT_COUNTER=$(osascript -e 'try
+tell app "SystemUIServer"
+set answer to text returned of (display dialog "Bitte aktuellen Zählerstand eingeben \n(Max Nummer der letzten Datei!)" default answer "")
+end
+end
+activate app (path to frontmost application as text)
+answer' | tr '\r' ' ')
+[[ -z "$CURRENT_COUNTER" ]] &amp;&amp; exit
+
+check_current_counter ${CURRENT_COUNTER}
+
+}
+
+#######################
+
+# check if user input is a valid number
+function check_current_counter(){
+
+  re='^[0-9]+$'
+  if ! [[ $1 =~ $re ]] ; then
+     decho "error: Not a number exit" &gt;&amp;2; exit 1
+  fi
+
+}
+
+#######################
+
+function bubble_sort()
+{   #
+    # @param [ARGUMENTS]...
+    #
+    # Sort all positional arguments and store them in global array BSORT.
+    # Without arguments sort this array. Return the number of iterations made.
+    #
+    # Bubble sorting lets the heaviest element sink to the bottom.
+    #
+    (($# &gt; 0)) &amp;&amp; BSORT=("$@")
+    local j=0 ubound=$((${#BSORT[*]} - 1))
+    while ((ubound &gt; 0))
+    do
+        local i=0
+        while ((i &lt; ubound))
+        do
+            if [ "${BSORT[$i]}" \&gt; "${BSORT[$((i + 1))]}" ]
+            then
+                local t="${BSORT[$i]}"
+                BSORT[$i]="${BSORT[$((i + 1))]}"
+                BSORT[$((i + 1))]="$t"
+            fi
+            ((++i))
+        done
+        ((++j))
+        ((--ubound))
+    done
+    echo $j
+}
+
+#######################
+
+function rename_files(){
+
+# save and change IFS that filenames with blank work
+OLDIFS=$IFS
+IFS=$'\n'
+
+# loop all directorys
+for DIRECTORY in $@;
+do
+	# check if directory is a directory and exists
+	if [ -d ${DIRECTORY} ]
+	then :
+
+    declare -a FILE_ARRAY
+    FILE_ARRAY=($(find -E ${DIRECTORY} -maxdepth 10 -mmin +1 ! -name '*.DS_Store*' -type f -print -regex ".*\.(jpg|JPG|nef|NEF|jpeg|JPEG)" | grep -v temp | awk -F"/" '{print $NF}')) || exit 1
+
+    # sorting files (the bubble sort function echos the number of iterations i dont need this)
+    bubble_sort ${FILE_ARRAY[@]} &gt;/dev/null
+
+		decho "\n$(date '+%F %T'): The following files are found in ${DIRECTORY}"
+		decho "-&gt;"
+
+    declare FILE_NAME_LAST_RENAMED="NULL"
+
+		for DATA_FILE in ${BSORT[@]}
+		do
+
+      ### FILE PROCESSING
+
+      decho "renaming file ${DATA_FILE}"
+
+      FILE_EXTETION=${DATA_FILE##*.}
+      FILE_NAME=${DATA_FILE%.*}
+
+      decho "filename: ${FILE_NAME}"
+      decho "fileextention: ${FILE_EXTETION}"
+      decho ""
+
+      if [ ${FILE_NAME_LAST_RENAMED} == ${FILE_NAME} ]
+      then :
+
+          decho "Same Filename!"
+          decho "rename ${FILE_NAME}.${FILE_EXTETION} to DSC_${CURRENT_COUNTER}.${FILE_EXTETION}"
+          #renaming file
+          mv ${DIRECTORY}/${FILE_NAME}.${FILE_EXTETION} ${DIRECTORY}/DSC_${CURRENT_COUNTER}.${FILE_EXTETION}
+
+      else :
+
+          CURRENT_COUNTER=$((CURRENT_COUNTER+1))
+          decho "New File"
+          decho "rename ${FILE_NAME}.${FILE_EXTETION} to DSC_${CURRENT_COUNTER}.${FILE_EXTETION}"
+          mv ${DIRECTORY}/${FILE_NAME}.${FILE_EXTETION} ${DIRECTORY}/DSC_${CURRENT_COUNTER}.${FILE_EXTETION}
+      fi
+
+      # saving last renamed filename for next iteration
+      FILE_NAME_LAST_RENAMED=${FILE_NAME}
+
+    done
+
+		decho "-&gt;"
+
+	else
+		# directory check fail
+		decho "${DIRECTORY} is not a directory check parameter"
+	fi
+done
+
+  # restore IFS
+  IFS=$OLDIFS
+
+return
+
+}
+#######################
+
+####################################################
+############# MAIN #################################
+
+# start working
+start_processing $@
+
+# get actual counter from user
+get_counter
+
+# renaming files
+rename_files $@
+</string>
+					<key>CheckedForUserDefaultShell</key>
+					<true/>
+					<key>inputMethod</key>
+					<integer>1</integer>
+					<key>shell</key>
+					<string>/bin/bash</string>
+					<key>source</key>
+					<string></string>
+				</dict>
+				<key>BundleIdentifier</key>
+				<string>com.apple.RunShellScript</string>
+				<key>CFBundleVersion</key>
+				<string>2.0.3</string>
+				<key>CanShowSelectedItemsWhenRun</key>
+				<false/>
+				<key>CanShowWhenRun</key>
+				<true/>
+				<key>Category</key>
+				<array>
+					<string>AMCategoryUtilities</string>
+				</array>
+				<key>Class Name</key>
+				<string>RunShellScriptAction</string>
+				<key>InputUUID</key>
+				<string>2DB0BD8D-2047-41BA-B5EB-F636421F2E8B</string>
+				<key>Keywords</key>
+				<array>
+					<string>Shell</string>
+					<string>Skript</string>
+					<string>Befehl</string>
+					<string>Ausführen</string>
+					<string>Unix</string>
+				</array>
+				<key>OutputUUID</key>
+				<string>98BF6C79-3663-4995-9C9F-B949C5167636</string>
+				<key>UUID</key>
+				<string>47DB44B5-4893-41D8-84D5-3A33FF489CF7</string>
+				<key>UnlocalizedApplications</key>
+				<array>
+					<string>Automator</string>
+				</array>
+				<key>arguments</key>
+				<dict>
+					<key>0</key>
+					<dict>
+						<key>default value</key>
+						<integer>0</integer>
+						<key>name</key>
+						<string>inputMethod</string>
+						<key>required</key>
+						<string>0</string>
+						<key>type</key>
+						<string>0</string>
+						<key>uuid</key>
+						<string>0</string>
+					</dict>
+					<key>1</key>
+					<dict>
+						<key>default value</key>
+						<string></string>
+						<key>name</key>
+						<string>source</string>
+						<key>required</key>
+						<string>0</string>
+						<key>type</key>
+						<string>0</string>
+						<key>uuid</key>
+						<string>1</string>
+					</dict>
+					<key>2</key>
+					<dict>
+						<key>default value</key>
+						<false/>
+						<key>name</key>
+						<string>CheckedForUserDefaultShell</string>
+						<key>required</key>
+						<string>0</string>
+						<key>type</key>
+						<string>0</string>
+						<key>uuid</key>
+						<string>2</string>
+					</dict>
+					<key>3</key>
+					<dict>
+						<key>default value</key>
+						<string></string>
+						<key>name</key>
+						<string>COMMAND_STRING</string>
+						<key>required</key>
+						<string>0</string>
+						<key>type</key>
+						<string>0</string>
+						<key>uuid</key>
+						<string>3</string>
+					</dict>
+					<key>4</key>
+					<dict>
+						<key>default value</key>
+						<string>/bin/sh</string>
+						<key>name</key>
+						<string>shell</string>
+						<key>required</key>
+						<string>0</string>
+						<key>type</key>
+						<string>0</string>
+						<key>uuid</key>
+						<string>4</string>
+					</dict>
+				</dict>
+				<key>isViewVisible</key>
+				<true/>
+				<key>location</key>
+				<string>529.000000:253.000000</string>
+				<key>nibPath</key>
+				<string>/System/Library/Automator/Run Shell Script.action/Contents/Resources/German.lproj/main.nib</string>
+			</dict>
+			<key>isViewVisible</key>
+			<true/>
+		</dict>
+	</array>
+	<key>connectors</key>
+	<dict/>
+	<key>workflowMetaData</key>
+	<dict>
+		<key>workflowTypeIdentifier</key>
+		<string>com.apple.Automator.application</string>
+	</dict>
+</dict>
+</plist>
